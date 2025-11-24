@@ -1851,6 +1851,14 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
                   ),
           ),
           actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showAddIndexDialog();
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Add Index'),
+            ),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
@@ -1863,6 +1871,174 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading indexes: $e')));
+      }
+    }
+  }
+
+  Future<void> _showAddIndexDialog() async {
+    final indexNameController = TextEditingController();
+    final selectedColumns = <String>[];
+    bool isUnique = false;
+
+    // Get available columns
+    final columns =
+        _columns
+            ?.map(
+              (col) =>
+                  col['column_name']?.toString() ??
+                  col['COLUMN_NAME']?.toString() ??
+                  '',
+            )
+            .toList() ??
+        [];
+
+    if (columns.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No columns available')));
+      }
+      return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Add Index'),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: indexNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Index Name',
+                    hintText: 'idx_column_name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                CheckboxListTile(
+                  title: const Text('Unique Index'),
+                  value: isUnique,
+                  onChanged: (value) {
+                    setState(() {
+                      isUnique = value ?? false;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Select Columns:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Flexible(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: columns.map((column) {
+                        return CheckboxListTile(
+                          title: Text(column),
+                          value: selectedColumns.contains(column),
+                          onChanged: (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                selectedColumns.add(column);
+                              } else {
+                                selectedColumns.remove(column);
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (indexNameController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter an index name')),
+                  );
+                  return;
+                }
+                if (selectedColumns.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please select at least one column'),
+                    ),
+                  );
+                  return;
+                }
+
+                Navigator.pop(context);
+                await _createIndex(
+                  indexNameController.text,
+                  selectedColumns,
+                  isUnique,
+                );
+              },
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    indexNameController.dispose();
+  }
+
+  Future<void> _createIndex(
+    String indexName,
+    List<String> columns,
+    bool isUnique,
+  ) async {
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      final uniqueKeyword = isUnique ? 'UNIQUE ' : '';
+      final columnsList = columns.join(', ');
+
+      String query;
+      if (adapter is PostgresAdapter || adapter is MysqlAdapter) {
+        query =
+            'CREATE ${uniqueKeyword}INDEX $indexName ON ${widget.tableName} ($columnsList)';
+      } else {
+        // MSSQL
+        query =
+            'CREATE ${uniqueKeyword}INDEX $indexName ON ${widget.tableName} ($columnsList)';
+      }
+
+      await adapter.query(query);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Index "$indexName" created successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error creating index: $e')));
       }
     }
   }
