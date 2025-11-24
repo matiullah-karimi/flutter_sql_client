@@ -28,6 +28,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   final Map<String, PlutoGridStateManager> _gridStateManagers = {};
   String _tableSearchQuery = '';
   List<String> _suggestions = [];
+  double _sidebarWidth = 250.0;
 
   @override
   void dispose() {
@@ -161,369 +162,421 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
           ),
         ],
       ),
-      body: Row(
-        children: [
-          // Schema Explorer
-          SizedBox(
-            width: 250,
-            child: Card(
-              margin: EdgeInsets.zero,
-              shape: const RoundedRectangleBorder(),
-              child: Column(
-                children: [
-                  // Database Selector
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: databasesAsync.when(
-                            data: (databases) {
-                              // Ensure currentDbName is in the list or null
-                              final value = databases.contains(currentDbName)
-                                  ? currentDbName
-                                  : null;
-                              return DropdownButton<String>(
-                                isExpanded: true,
-                                value: value,
-                                hint: const Text('Select Database'),
-                                items: databases.map((db) {
-                                  return DropdownMenuItem(
-                                    value: db,
-                                    child: Text(
-                                      db,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxWidth = constraints.maxWidth / 2;
+          return Row(
+            children: [
+              // Schema Explorer
+              SizedBox(
+                width: _sidebarWidth.clamp(200.0, maxWidth),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  shape: const RoundedRectangleBorder(),
+                  child: Column(
+                    children: [
+                      // Database Selector
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: databasesAsync.when(
+                                data: (databases) {
+                                  // Ensure currentDbName is in the list or null
+                                  final value =
+                                      databases.contains(currentDbName)
+                                      ? currentDbName
+                                      : null;
+                                  return DropdownButton<String>(
+                                    isExpanded: true,
+                                    value: value,
+                                    hint: const Text('Select Database'),
+                                    items: databases.map((db) {
+                                      return DropdownMenuItem(
+                                        value: db,
+                                        child: Text(
+                                          db,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      );
+                                    }).toList(),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        ref
+                                                .read(
+                                                  activeDatabaseProvider(
+                                                    widget.connectionId,
+                                                  ).notifier,
+                                                )
+                                                .state =
+                                            value;
+                                        // Invalidate tables to reload for new db
+                                        ref.invalidate(
+                                          tablesProvider(widget.connectionId),
+                                        );
+                                      }
+                                    },
                                   );
-                                }).toList(),
-                                onChanged: (value) {
-                                  if (value != null) {
-                                    ref
-                                            .read(
-                                              activeDatabaseProvider(
-                                                widget.connectionId,
-                                              ).notifier,
-                                            )
-                                            .state =
-                                        value;
-                                    // Invalidate tables to reload for new db
-                                    ref.invalidate(
-                                      tablesProvider(widget.connectionId),
-                                    );
-                                  }
                                 },
-                              );
-                            },
-                            loading: () => const LinearProgressIndicator(),
-                            error: (err, stack) =>
-                                const Text('Error loading databases'),
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert, size: 20),
-                          tooltip: 'Database Actions',
-                          onSelected: (value) {
-                            if (value == 'create') {
-                              _showCreateDatabaseDialog();
-                            } else if (value == 'drop') {
-                              if (currentDbName != null) {
-                                _showDropDatabaseDialog(currentDbName);
-                              }
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'create',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.add,
-                                    color: Colors.green,
-                                    size: 20,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text('Create Database'),
-                                ],
+                                loading: () => const LinearProgressIndicator(),
+                                error: (err, stack) =>
+                                    const Text('Error loading databases'),
                               ),
                             ),
-                            if (currentDbName != null)
-                              const PopupMenuItem(
-                                value: 'drop',
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.delete,
-                                      color: Colors.red,
-                                      size: 20,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('Drop Database'),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Tables',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.refresh, size: 20),
-                          onPressed: () {
-                            ref.invalidate(tablesProvider(widget.connectionId));
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Search field
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search tables...',
-                        prefixIcon: Icon(Icons.search, size: 20),
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 12,
-                        ),
-                        isDense: true,
-                      ),
-                      onChanged: (value) {
-                        setState(() {
-                          _tableSearchQuery = value.toLowerCase();
-                        });
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: tablesAsync.when(
-                      data: (tables) {
-                        // Filter tables based on search query
-                        final filteredTables = _tableSearchQuery.isEmpty
-                            ? tables
-                            : tables
-                                  .where(
-                                    (table) => table.toLowerCase().contains(
-                                      _tableSearchQuery,
-                                    ),
-                                  )
-                                  .toList();
-
-                        if (filteredTables.isEmpty) {
-                          return const Center(child: Text('No tables found'));
-                        }
-
-                        return ListView.separated(
-                          itemCount: filteredTables.length,
-                          separatorBuilder: (context, index) => const Divider(
-                            height: 1,
-                            thickness: 1,
-                            indent: 16,
-                            endIndent: 16,
-                          ),
-                          itemBuilder: (context, index) {
-                            final tableName = filteredTables[index];
-                            return ListTile(
-                              title: Text(tableName),
-                              dense: true,
-                              leading: const Icon(Icons.table_chart, size: 16),
-                              trailing: PopupMenuButton<String>(
-                                icon: const Icon(Icons.more_vert),
-                                onSelected: (value) {
-                                  if (value == 'structure') {
-                                    _showTableStructure(tableName);
-                                  } else if (value == 'drop') {
-                                    _showDropTableDialog(tableName);
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 20),
+                              tooltip: 'Database Actions',
+                              onSelected: (value) {
+                                if (value == 'create') {
+                                  _showCreateDatabaseDialog();
+                                } else if (value == 'drop') {
+                                  if (currentDbName != null) {
+                                    _showDropDatabaseDialog(currentDbName);
                                   }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'structure',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.info_outline),
-                                        SizedBox(width: 8),
-                                        Text('Structure'),
-                                      ],
-                                    ),
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'create',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.add,
+                                        color: Colors.green,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Create Database'),
+                                    ],
                                   ),
+                                ),
+                                if (currentDbName != null)
                                   const PopupMenuItem(
                                     value: 'drop',
                                     child: Row(
                                       children: [
-                                        Icon(Icons.delete, color: Colors.red),
+                                        Icon(
+                                          Icons.delete,
+                                          color: Colors.red,
+                                          size: 20,
+                                        ),
                                         SizedBox(width: 8),
-                                        Text('Drop Table'),
+                                        Text('Drop Database'),
                                       ],
                                     ),
                                   ),
-                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Row(
+                          children: [
+                            const Expanded(
+                              child: Text(
+                                'Tables',
+                                style: TextStyle(fontWeight: FontWeight.bold),
                               ),
-                              onTap: () {
-                                if (tabs.isNotEmpty &&
-                                    activeTabIndex < tabs.length) {
-                                  final activeTab = tabs[activeTabIndex];
-                                  final controller = _getOrCreateController(
-                                    activeTab.id,
-                                    activeTab.content,
-                                  );
-                                  controller.text =
-                                      'SELECT * FROM $tableName LIMIT 100;';
-                                }
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.refresh, size: 20),
+                              onPressed: () {
+                                ref.invalidate(
+                                  tablesProvider(widget.connectionId),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Search field
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: TextField(
+                          decoration: const InputDecoration(
+                            hintText: 'Search tables...',
+                            prefixIcon: Icon(Icons.search, size: 20),
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              vertical: 8,
+                              horizontal: 12,
+                            ),
+                            isDense: true,
+                          ),
+                          onChanged: (value) {
+                            setState(() {
+                              _tableSearchQuery = value.toLowerCase();
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: tablesAsync.when(
+                          data: (tables) {
+                            // Filter tables based on search query
+                            final filteredTables = _tableSearchQuery.isEmpty
+                                ? tables
+                                : tables
+                                      .where(
+                                        (table) => table.toLowerCase().contains(
+                                          _tableSearchQuery,
+                                        ),
+                                      )
+                                      .toList();
+
+                            if (filteredTables.isEmpty) {
+                              return const Center(
+                                child: Text('No tables found'),
+                              );
+                            }
+
+                            return ListView.separated(
+                              itemCount: filteredTables.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(
+                                    height: 1,
+                                    thickness: 1,
+                                    indent: 16,
+                                    endIndent: 16,
+                                  ),
+                              itemBuilder: (context, index) {
+                                final tableName = filteredTables[index];
+                                return ListTile(
+                                  title: Text(tableName),
+                                  dense: true,
+                                  leading: const Icon(
+                                    Icons.table_chart,
+                                    size: 16,
+                                  ),
+                                  trailing: PopupMenuButton<String>(
+                                    icon: const Icon(Icons.more_vert),
+                                    onSelected: (value) {
+                                      if (value == 'structure') {
+                                        _showTableStructure(tableName);
+                                      } else if (value == 'drop') {
+                                        _showDropTableDialog(tableName);
+                                      }
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'structure',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.info_outline),
+                                            SizedBox(width: 8),
+                                            Text('Structure'),
+                                          ],
+                                        ),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'drop',
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.delete,
+                                              color: Colors.red,
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text('Drop Table'),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  onTap: () {
+                                    if (tabs.isNotEmpty &&
+                                        activeTabIndex < tabs.length) {
+                                      final activeTab = tabs[activeTabIndex];
+                                      final controller = _getOrCreateController(
+                                        activeTab.id,
+                                        activeTab.content,
+                                      );
+                                      controller.text =
+                                          'SELECT * FROM $tableName LIMIT 100;';
+                                    }
+                                  },
+                                );
                               },
                             );
                           },
-                        );
-                      },
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (err, stack) => Center(child: Text('Error: $err')),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // Main Content
-          Expanded(
-            child: Column(
-              children: [
-                // Tab Bar
-                Container(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              for (int i = 0; i < tabs.length; i++)
-                                _buildTab(context, tabs[i], i, activeTabIndex),
-                            ],
-                          ),
+                          loading: () =>
+                              const Center(child: CircularProgressIndicator()),
+                          error: (err, stack) =>
+                              Center(child: Text('Error: $err')),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.add, size: 20),
-                        tooltip: 'New Query Tab',
-                        onPressed: () {
-                          ref
-                              .read(
-                                queryTabsProvider(widget.connectionId).notifier,
-                              )
-                              .addTab();
-                          ref
-                                  .read(
-                                    activeTabIndexProvider(
-                                      widget.connectionId,
-                                    ).notifier,
-                                  )
-                                  .state =
-                              tabs.length;
-                        },
                       ),
                     ],
                   ),
                 ),
-                // Query Editor
-                if (tabs.isNotEmpty && activeTabIndex < tabs.length)
-                  Expanded(
-                    flex: 1,
-                    child: CodeTheme(
-                      data: CodeThemeData(
-                        styles: Theme.of(context).brightness == Brightness.dark
-                            ? sqlDarkTheme
-                            : sqlTheme,
+              ),
+              // Draggable Divider
+              GestureDetector(
+                onHorizontalDragUpdate: (details) {
+                  setState(() {
+                    _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
+                      200.0,
+                      maxWidth,
+                    );
+                  });
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: Container(
+                    width: 4,
+                    color: Theme.of(context).dividerColor,
+                    child: Center(
+                      child: Container(
+                        width: 1,
+                        color: Theme.of(context).colorScheme.outline,
                       ),
-                      child: Stack(
+                    ),
+                  ),
+                ),
+              ),
+              // Main Content
+              Expanded(
+                child: Column(
+                  children: [
+                    // Tab Bar
+                    Container(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      child: Row(
                         children: [
-                          SingleChildScrollView(
-                            child: CodeField(
-                              controller: _getOrCreateController(
-                                tabs[activeTabIndex].id,
-                                tabs[activeTabIndex].content,
-                              ),
-                              textStyle: const TextStyle(
-                                fontFamily: 'monospace',
-                              ),
-                              minLines: 10,
-                              onChanged: (value) => _onCodeChanged(
-                                value,
-                                _getOrCreateController(
-                                  tabs[activeTabIndex].id,
-                                  tabs[activeTabIndex].content,
-                                ),
-                                tabs[activeTabIndex].id,
+                          Expanded(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  for (int i = 0; i < tabs.length; i++)
+                                    _buildTab(
+                                      context,
+                                      tabs[i],
+                                      i,
+                                      activeTabIndex,
+                                    ),
+                                ],
                               ),
                             ),
                           ),
-                          if (_suggestions.isNotEmpty)
-                            Positioned(
-                              bottom: 0,
-                              left: 0,
-                              right: 0,
-                              child: Container(
-                                height: 40,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                child: ListView.builder(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: _suggestions.length,
-                                  itemBuilder: (context, index) {
-                                    final suggestion = _suggestions[index];
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 4,
-                                        vertical: 4,
-                                      ),
-                                      child: ActionChip(
-                                        label: Text(suggestion),
-                                        onPressed: () => _insertSuggestion(
-                                          suggestion,
-                                          _getOrCreateController(
-                                            tabs[activeTabIndex].id,
-                                            tabs[activeTabIndex].content,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
+                          IconButton(
+                            icon: const Icon(Icons.add, size: 20),
+                            tooltip: 'New Query Tab',
+                            onPressed: () {
+                              ref
+                                  .read(
+                                    queryTabsProvider(
+                                      widget.connectionId,
+                                    ).notifier,
+                                  )
+                                  .addTab();
+                              ref
+                                      .read(
+                                        activeTabIndexProvider(
+                                          widget.connectionId,
+                                        ).notifier,
+                                      )
+                                      .state =
+                                  tabs.length;
+                            },
+                          ),
                         ],
                       ),
                     ),
-                  ),
-                const Divider(height: 1),
-                // Results
-                if (tabs.isNotEmpty && activeTabIndex < tabs.length)
-                  Expanded(
-                    flex: 2,
-                    child: KeyedSubtree(
-                      key: ValueKey(tabs[activeTabIndex].id),
-                      child: _buildResults(tabs[activeTabIndex]),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
+                    // Query Editor
+                    if (tabs.isNotEmpty && activeTabIndex < tabs.length)
+                      Expanded(
+                        flex: 1,
+                        child: CodeTheme(
+                          data: CodeThemeData(
+                            styles:
+                                Theme.of(context).brightness == Brightness.dark
+                                ? sqlDarkTheme
+                                : sqlTheme,
+                          ),
+                          child: Stack(
+                            children: [
+                              SingleChildScrollView(
+                                child: CodeField(
+                                  controller: _getOrCreateController(
+                                    tabs[activeTabIndex].id,
+                                    tabs[activeTabIndex].content,
+                                  ),
+                                  textStyle: const TextStyle(
+                                    fontFamily: 'monospace',
+                                  ),
+                                  minLines: 10,
+                                  onChanged: (value) => _onCodeChanged(
+                                    value,
+                                    _getOrCreateController(
+                                      tabs[activeTabIndex].id,
+                                      tabs[activeTabIndex].content,
+                                    ),
+                                    tabs[activeTabIndex].id,
+                                  ),
+                                ),
+                              ),
+                              if (_suggestions.isNotEmpty)
+                                Positioned(
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Container(
+                                    height: 40,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerHighest,
+                                    child: ListView.builder(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: _suggestions.length,
+                                      itemBuilder: (context, index) {
+                                        final suggestion = _suggestions[index];
+                                        return Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 4,
+                                          ),
+                                          child: ActionChip(
+                                            label: Text(suggestion),
+                                            onPressed: () => _insertSuggestion(
+                                              suggestion,
+                                              _getOrCreateController(
+                                                tabs[activeTabIndex].id,
+                                                tabs[activeTabIndex].content,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    const Divider(height: 1),
+                    // Results
+                    if (tabs.isNotEmpty && activeTabIndex < tabs.length)
+                      Expanded(
+                        flex: 2,
+                        child: KeyedSubtree(
+                          key: ValueKey(tabs[activeTabIndex].id),
+                          child: _buildResults(tabs[activeTabIndex]),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
