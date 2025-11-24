@@ -85,6 +85,16 @@ class PostgresAdapter implements DatabaseAdapter {
   }
 
   @override
+  Future<void> dropDatabase(String name) async {
+    await query('DROP DATABASE "$name"');
+  }
+
+  @override
+  Future<void> dropTable(String name) async {
+    await query('DROP TABLE "$name"');
+  }
+
+  @override
   Future<void> exportDatabase(String filePath) async {
     final file = File(filePath);
     final sink = file.openWrite();

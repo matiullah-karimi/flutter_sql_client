@@ -219,10 +219,49 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                 const Text('Error loading databases'),
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.add, size: 20),
-                          tooltip: 'Create Database',
-                          onPressed: () => _showCreateDatabaseDialog(),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert, size: 20),
+                          tooltip: 'Database Actions',
+                          onSelected: (value) {
+                            if (value == 'create') {
+                              _showCreateDatabaseDialog();
+                            } else if (value == 'drop') {
+                              if (currentDbName != null) {
+                                _showDropDatabaseDialog(currentDbName);
+                              }
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'create',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.add,
+                                    color: Colors.green,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text('Create Database'),
+                                ],
+                              ),
+                            ),
+                            if (currentDbName != null)
+                              const PopupMenuItem(
+                                value: 'drop',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.delete,
+                                      color: Colors.red,
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Drop Database'),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -301,10 +340,37 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                               title: Text(tableName),
                               dense: true,
                               leading: const Icon(Icons.table_chart, size: 16),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.info_outline, size: 16),
-                                tooltip: 'View Structure',
-                                onPressed: () => _showTableStructure(tableName),
+                              trailing: PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert),
+                                onSelected: (value) {
+                                  if (value == 'structure') {
+                                    _showTableStructure(tableName);
+                                  } else if (value == 'drop') {
+                                    _showDropTableDialog(tableName);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'structure',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.info_outline),
+                                        SizedBox(width: 8),
+                                        Text('Structure'),
+                                      ],
+                                    ),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'drop',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.delete, color: Colors.red),
+                                        SizedBox(width: 8),
+                                        Text('Drop Table'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                               onTap: () {
                                 if (tabs.isNotEmpty &&
@@ -886,6 +952,100 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error exporting database: $e')));
+      }
+    }
+  }
+
+  Future<void> _showDropDatabaseDialog(String dbName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Drop Database "$dbName"?'),
+        content: const Text(
+          'Are you sure you want to delete this database? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Drop'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final adapter = await ref.read(
+          databaseAdapterProvider(widget.connectionId).future,
+        );
+
+        await adapter.dropDatabase(dbName);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Database "$dbName" dropped successfully')),
+          );
+          // Invalidate databases list and reset active database
+          ref.invalidate(databasesProvider(widget.connectionId));
+          ref.read(activeDatabaseProvider(widget.connectionId).notifier).state =
+              null;
+          ref.invalidate(tablesProvider(widget.connectionId));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error dropping database: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _showDropTableDialog(String tableName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Drop Table "$tableName"?'),
+        content: const Text(
+          'Are you sure you want to delete this table? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Drop'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final adapter = await ref.read(
+          databaseAdapterProvider(widget.connectionId).future,
+        );
+        await adapter.dropTable(tableName);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Table "$tableName" dropped successfully')),
+          );
+          ref.invalidate(tablesProvider(widget.connectionId));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error dropping table: $e')));
+        }
       }
     }
   }

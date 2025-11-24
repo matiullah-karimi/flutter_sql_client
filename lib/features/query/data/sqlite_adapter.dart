@@ -54,6 +54,18 @@ class SqliteAdapter implements DatabaseAdapter {
   }
 
   @override
+  Future<void> dropDatabase(String name) async {
+    throw UnimplementedError(
+      'Cannot drop database in SQLite via SQL connection',
+    );
+  }
+
+  @override
+  Future<void> dropTable(String name) async {
+    await query('DROP TABLE "$name"');
+  }
+
+  @override
   Future<void> exportDatabase(String filePath) async {
     final file = File(filePath);
     final sink = file.openWrite();
