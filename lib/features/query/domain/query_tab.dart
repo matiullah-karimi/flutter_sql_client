@@ -1,10 +1,10 @@
 class QueryTab {
   final String id;
   final String title;
-  String content;
-  List<Map<String, dynamic>>? results;
-  String? error;
-  bool isLoading;
+  final String content;
+  final List<Map<String, dynamic>>? results;
+  final String? error;
+  final bool isLoading;
 
   QueryTab({
     required this.id,

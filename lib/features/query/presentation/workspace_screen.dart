@@ -199,7 +199,13 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                 const Divider(height: 1),
                 // Results
                 if (tabs.isNotEmpty && activeTabIndex < tabs.length)
-                  Expanded(flex: 2, child: _buildResults(tabs[activeTabIndex])),
+                  Expanded(
+                    flex: 2,
+                    child: KeyedSubtree(
+                      key: ValueKey(tabs[activeTabIndex].id),
+                      child: _buildResults(tabs[activeTabIndex]),
+                    ),
+                  ),
               ],
             ),
           ),
