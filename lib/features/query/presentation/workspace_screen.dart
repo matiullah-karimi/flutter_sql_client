@@ -1,0 +1,394 @@
+import 'dart:io';
+import 'package:csv/csv.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
+import 'package:flutter_sql_client/features/query/presentation/query_tabs_provider.dart';
+import 'package:highlight/languages/sql.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pluto_grid/pluto_grid.dart';
+
+class WorkspaceScreen extends ConsumerStatefulWidget {
+  final int connectionId;
+  const WorkspaceScreen({super.key, required this.connectionId});
+
+  @override
+  ConsumerState<WorkspaceScreen> createState() => _WorkspaceScreenState();
+}
+
+class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
+  final Map<String, CodeController> _codeControllers = {};
+
+  @override
+  void dispose() {
+    for (final controller in _codeControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  CodeController _getOrCreateController(String tabId, String initialContent) {
+    if (!_codeControllers.containsKey(tabId)) {
+      _codeControllers[tabId] = CodeController(
+        text: initialContent,
+        language: sql,
+      );
+    }
+    return _codeControllers[tabId]!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tablesAsync = ref.watch(tablesProvider(widget.connectionId));
+    final tabs = ref.watch(queryTabsProvider(widget.connectionId));
+    final activeTabIndex = ref.watch(
+      activeTabIndexProvider(widget.connectionId),
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Workspace'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.play_arrow),
+            tooltip: 'Run Query',
+            onPressed: () => _runQuery(tabs, activeTabIndex),
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Export Results',
+            onPressed: () => _exportResults(context, tabs, activeTabIndex),
+          ),
+        ],
+      ),
+      body: Row(
+        children: [
+          // Schema Explorer
+          SizedBox(
+            width: 250,
+            child: Card(
+              margin: EdgeInsets.zero,
+              shape: const RoundedRectangleBorder(),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Tables',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh, size: 20),
+                          onPressed: () {
+                            ref.invalidate(tablesProvider(widget.connectionId));
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: tablesAsync.when(
+                      data: (tables) => ListView.builder(
+                        itemCount: tables.length,
+                        itemBuilder: (context, index) {
+                          return ListTile(
+                            title: Text(tables[index]),
+                            dense: true,
+                            leading: const Icon(Icons.table_chart, size: 16),
+                            onTap: () {
+                              if (tabs.isNotEmpty &&
+                                  activeTabIndex < tabs.length) {
+                                final activeTab = tabs[activeTabIndex];
+                                final controller = _getOrCreateController(
+                                  activeTab.id,
+                                  activeTab.content,
+                                );
+                                controller.text =
+                                    'SELECT * FROM ${tables[index]} LIMIT 100;';
+                              }
+                            },
+                          );
+                        },
+                      ),
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (err, stack) => Center(child: Text('Error: $err')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Main Content
+          Expanded(
+            child: Column(
+              children: [
+                // Tab Bar
+                Container(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (int i = 0; i < tabs.length; i++)
+                                _buildTab(context, tabs[i], i, activeTabIndex),
+                            ],
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add, size: 20),
+                        tooltip: 'New Query Tab',
+                        onPressed: () {
+                          ref
+                              .read(
+                                queryTabsProvider(widget.connectionId).notifier,
+                              )
+                              .addTab();
+                          ref
+                                  .read(
+                                    activeTabIndexProvider(
+                                      widget.connectionId,
+                                    ).notifier,
+                                  )
+                                  .state =
+                              tabs.length;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                // Query Editor
+                if (tabs.isNotEmpty && activeTabIndex < tabs.length)
+                  Expanded(
+                    flex: 1,
+                    child: CodeTheme(
+                      data: CodeThemeData(styles: const {}),
+                      child: SingleChildScrollView(
+                        child: CodeField(
+                          controller: _getOrCreateController(
+                            tabs[activeTabIndex].id,
+                            tabs[activeTabIndex].content,
+                          ),
+                          textStyle: const TextStyle(fontFamily: 'monospace'),
+                          minLines: 10,
+                          onChanged: (value) {
+                            ref
+                                .read(
+                                  queryTabsProvider(
+                                    widget.connectionId,
+                                  ).notifier,
+                                )
+                                .updateTabContent(
+                                  tabs[activeTabIndex].id,
+                                  value,
+                                );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                const Divider(height: 1),
+                // Results
+                if (tabs.isNotEmpty && activeTabIndex < tabs.length)
+                  Expanded(flex: 2, child: _buildResults(tabs[activeTabIndex])),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runQuery(List tabs, int activeTabIndex) async {
+    if (tabs.isEmpty || activeTabIndex >= tabs.length) return;
+
+    final activeTab = tabs[activeTabIndex];
+    final controller = _codeControllers[activeTab.id];
+
+    if (controller == null || controller.text.isEmpty) return;
+
+    // Set loading state
+    ref
+        .read(queryTabsProvider(widget.connectionId).notifier)
+        .setTabLoading(activeTab.id, true);
+
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+      final results = await adapter.query(controller.text);
+
+      ref
+          .read(queryTabsProvider(widget.connectionId).notifier)
+          .setTabResults(activeTab.id, results);
+    } catch (e) {
+      ref
+          .read(queryTabsProvider(widget.connectionId).notifier)
+          .setTabError(activeTab.id, e.toString());
+    }
+  }
+
+  Widget _buildResults(tab) {
+    if (tab.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (tab.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Error: ${tab.error}',
+            style: const TextStyle(color: Colors.red),
+          ),
+        ),
+      );
+    }
+
+    final results = tab.results;
+    if (results == null || results.isEmpty) {
+      return const Center(child: Text('No results or no query run yet.'));
+    }
+
+    return PlutoGrid(
+      columns: results.first.keys.map<PlutoColumn>((key) {
+        return PlutoColumn(
+          title: key,
+          field: key,
+          type: PlutoColumnType.text(),
+        );
+      }).toList(),
+      rows: results.map<PlutoRow>((row) {
+        return PlutoRow(
+          cells: Map<String, PlutoCell>.fromEntries(
+            row.entries.map<MapEntry<String, PlutoCell>>((
+              MapEntry<String, dynamic> entry,
+            ) {
+              return MapEntry(
+                entry.key,
+                PlutoCell(value: entry.value.toString()),
+              );
+            }),
+          ),
+        );
+      }).toList(),
+      configuration: const PlutoGridConfiguration(
+        style: PlutoGridStyleConfig(enableGridBorderShadow: false),
+      ),
+    );
+  }
+
+  Widget _buildTab(BuildContext context, tab, int index, int activeIndex) {
+    final isActive = index == activeIndex;
+    return InkWell(
+      onTap: () {
+        ref.read(activeTabIndexProvider(widget.connectionId).notifier).state =
+            index;
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive
+              ? Theme.of(context).colorScheme.surface
+              : Colors.transparent,
+          border: Border(
+            bottom: BorderSide(
+              color: isActive
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              tab.title,
+              style: TextStyle(
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (ref.watch(queryTabsProvider(widget.connectionId)).length > 1)
+              InkWell(
+                onTap: () {
+                  ref
+                      .read(queryTabsProvider(widget.connectionId).notifier)
+                      .removeTab(tab.id);
+                  if (activeIndex >=
+                      ref.read(queryTabsProvider(widget.connectionId)).length) {
+                    ref
+                            .read(
+                              activeTabIndexProvider(
+                                widget.connectionId,
+                              ).notifier,
+                            )
+                            .state =
+                        ref
+                            .read(queryTabsProvider(widget.connectionId))
+                            .length -
+                        1;
+                  }
+                },
+                child: const Icon(Icons.close, size: 16),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportResults(
+    BuildContext context,
+    List tabs,
+    int activeTabIndex,
+  ) async {
+    if (tabs.isEmpty || activeTabIndex >= tabs.length) return;
+
+    final activeTab = tabs[activeTabIndex];
+    final results = activeTab.results;
+
+    if (results == null || results.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No results to export')));
+      return;
+    }
+
+    final csvData = <List<dynamic>>[
+      results.first.keys.toList(),
+      ...results.map((row) => row.values.toList()),
+    ];
+
+    final String csvString = const ListToCsvConverter().convert(csvData);
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(
+        '${directory.path}/export_${DateTime.now().millisecondsSinceEpoch}.csv',
+      );
+      await file.writeAsString(csvString);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Exported to ${file.path}')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    }
+  }
+}
