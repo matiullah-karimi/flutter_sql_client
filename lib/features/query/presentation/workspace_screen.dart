@@ -627,13 +627,67 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     }
   }
 
-  Future<void> _showTableStructure(String tableName) async {
+  void _showTableStructure(String tableName) {
+    showDialog(
+      context: context,
+      builder: (context) => _TableStructureDialog(
+        tableName: tableName,
+        connectionId: widget.connectionId,
+      ),
+    );
+  }
+}
+
+class _TableStructureDialog extends ConsumerStatefulWidget {
+  final String tableName;
+  final int connectionId;
+
+  const _TableStructureDialog({
+    required this.tableName,
+    required this.connectionId,
+  });
+
+  @override
+  ConsumerState<_TableStructureDialog> createState() =>
+      _TableStructureDialogState();
+}
+
+class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
+  List<Map<String, dynamic>>? _columns;
+  bool _isLoading = true;
+  String? _error;
+
+  bool _isAddingColumn = false;
+  final _nameController = TextEditingController();
+  final _typeController = TextEditingController(text: 'VARCHAR(255)');
+  bool _isNullable = true;
+  final _defaultController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadColumns();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _typeController.dispose();
+    _defaultController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadColumns() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
     try {
       final adapter = await ref.read(
         databaseAdapterProvider(widget.connectionId).future,
       );
 
-      // Query to get column information (works for most SQL databases)
       final query =
           '''
         SELECT 
@@ -642,318 +696,348 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
           is_nullable,
           column_default
         FROM information_schema.columns
-        WHERE table_name = '$tableName'
+        WHERE table_name = '${widget.tableName}'
         ORDER BY ordinal_position
       ''';
 
       final columns = await adapter.query(query);
 
-      if (!mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.table_chart),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Table Structure'),
-                    Text(
-                      tableName,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: 700,
-            height: 500,
-            child: Column(
-              children: [
-                // Action buttons
-                Row(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _showAddColumnDialog(tableName);
-                      },
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Add Column'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _showTableIndexes(tableName);
-                      },
-                      icon: const Icon(Icons.key, size: 16),
-                      label: const Text('View Indexes'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Divider(),
-                const SizedBox(height: 8),
-                // Columns list
-                Expanded(
-                  child: columns.isEmpty
-                      ? const Center(child: Text('No columns found'))
-                      : ListView.builder(
-                          itemCount: columns.length,
-                          itemBuilder: (context, index) {
-                            final column = columns[index];
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                leading: CircleAvatar(
-                                  radius: 16,
-                                  child: Text('${index + 1}'),
-                                ),
-                                title: const Text(
-                                  'Column',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.label, size: 14),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          'Name: ${column['column_name']}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.text_fields, size: 14),
-                                        const SizedBox(width: 4),
-                                        Text('Type: ${column['data_type']}'),
-                                      ],
-                                    ),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          column['is_nullable'] == 'YES'
-                                              ? Icons.check_circle_outline
-                                              : Icons.cancel_outlined,
-                                          size: 14,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          'Nullable: ${column['is_nullable']}',
-                                        ),
-                                      ],
-                                    ),
-                                    if (column['column_default'] != null)
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.settings, size: 14),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Default: ${column['column_default']}',
-                                          ),
-                                        ],
-                                      ),
-                                  ],
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.edit, size: 16),
-                                  tooltip: 'Edit column',
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    _showEditColumnDialog(
-                                      tableName,
-                                      column['column_name']?.toString() ?? '',
-                                    );
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
+      if (mounted) {
+        setState(() {
+          _columns = columns;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading structure: $e')));
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
       }
     }
   }
 
-  Future<void> _showAddColumnDialog(String tableName) async {
-    final nameController = TextEditingController();
-    final typeController = TextEditingController(text: 'VARCHAR(255)');
-    bool isNullable = true;
-    String? defaultValue;
+  Future<void> _addColumn() async {
+    if (_nameController.text.isEmpty || _typeController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name and type are required')),
+      );
+      return;
+    }
 
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('Add Column to $tableName'),
-          content: SizedBox(
-            width: 400,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Column Name',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: typeController,
-                  decoration: const InputDecoration(
-                    labelText: 'Data Type',
-                    border: OutlineInputBorder(),
-                    hintText: 'e.g., VARCHAR(255), INT, TEXT',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                CheckboxListTile(
-                  title: const Text('Nullable'),
-                  value: isNullable,
-                  onChanged: (value) {
-                    setState(() {
-                      isNullable = value ?? true;
-                    });
-                  },
-                ),
-                TextField(
-                  decoration: const InputDecoration(
-                    labelText: 'Default Value (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (value) {
-                    defaultValue = value.isEmpty ? null : value;
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (nameController.text.isEmpty ||
-                    typeController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Name and type are required')),
-                  );
-                  return;
-                }
-
-                try {
-                  final adapter = await ref.read(
-                    databaseAdapterProvider(widget.connectionId).future,
-                  );
-
-                  final alterQuery =
-                      '''
-                    ALTER TABLE $tableName 
-                    ADD COLUMN ${nameController.text} ${typeController.text}
-                    ${isNullable ? 'NULL' : 'NOT NULL'}
-                    ${defaultValue != null ? "DEFAULT '$defaultValue'" : ''}
-                  ''';
-
-                  await adapter.query(alterQuery);
-
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Column added successfully'),
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
-                  }
-                }
-              },
-              child: const Text('Add Column'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _showEditColumnDialog(
-    String tableName,
-    String columnName,
-  ) async {
-    // Note: Column editing varies greatly between databases
-    // This is a simplified version
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Column editing coming soon. Use SQL ALTER TABLE for now.',
-        ),
-        duration: Duration(seconds: 3),
-      ),
-    );
-  }
-
-  Future<void> _showTableIndexes(String tableName) async {
     try {
       final adapter = await ref.read(
         databaseAdapterProvider(widget.connectionId).future,
       );
 
-      // Query to get index information
+      final defaultValue = _defaultController.text.isEmpty
+          ? null
+          : _defaultController.text;
+
+      final alterQuery =
+          '''
+        ALTER TABLE ${widget.tableName} 
+        ADD COLUMN ${_nameController.text} ${_typeController.text}
+        ${_isNullable ? 'NULL' : 'NOT NULL'}
+        ${defaultValue != null ? "DEFAULT '$defaultValue'" : ''}
+      ''';
+
+      await adapter.query(alterQuery);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Column added successfully')),
+        );
+        setState(() {
+          _isAddingColumn = false;
+          _nameController.clear();
+          _typeController.text = 'VARCHAR(255)';
+          _isNullable = true;
+          _defaultController.clear();
+        });
+        _loadColumns();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(Icons.table_chart),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Table Structure'),
+                Text(
+                  widget.tableName,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 700,
+        height: 500,
+        child: Column(
+          children: [
+            Row(
+              children: [
+                if (!_isAddingColumn)
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _isAddingColumn = true;
+                      });
+                    },
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Column'),
+                  ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => _showTableIndexes(),
+                  icon: const Icon(Icons.key, size: 16),
+                  label: const Text('View Indexes'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(child: Text('Error: $_error'))
+                  : ListView(
+                      children: [
+                        if (_isAddingColumn) _buildAddColumnForm(),
+                        if (_columns != null && _columns!.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: Center(child: Text('No columns found')),
+                          )
+                        else if (_columns != null)
+                          ..._columns!.asMap().entries.map((entry) {
+                            final index = entry.key;
+                            final column = entry.value;
+                            return _buildColumnItem(index, column);
+                          }),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAddColumnForm() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.primary,
+          width: 2,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'New Column',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Name',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextField(
+                    controller: _typeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Type',
+                      hintText: 'VARCHAR(255)',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _defaultController,
+                    decoration: const InputDecoration(
+                      labelText: 'Default Value',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: CheckboxListTile(
+                    title: const Text('Nullable'),
+                    value: _isNullable,
+                    onChanged: (v) => setState(() => _isNullable = v ?? true),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _isAddingColumn = false;
+                    });
+                  },
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _addColumn,
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildColumnItem(int index, Map<String, dynamic> column) {
+    final columnName = column['column_name'] ?? column['COLUMN_NAME'] ?? '';
+    final dataType = column['data_type'] ?? column['DATA_TYPE'] ?? '';
+    final isNullable = column['is_nullable'] ?? column['IS_NULLABLE'] ?? 'NO';
+    final columnDefault = column['column_default'] ?? column['COLUMN_DEFAULT'];
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(radius: 16, child: Text('${index + 1}')),
+        title: const Text(
+          'Column',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.label, size: 14),
+                const SizedBox(width: 4),
+                Text(
+                  'Name: $columnName',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.text_fields, size: 14),
+                const SizedBox(width: 4),
+                Text('Type: $dataType'),
+              ],
+            ),
+            Row(
+              children: [
+                Icon(
+                  isNullable == 'YES'
+                      ? Icons.check_circle_outline
+                      : Icons.cancel_outlined,
+                  size: 14,
+                ),
+                const SizedBox(width: 4),
+                Text('Nullable: $isNullable'),
+              ],
+            ),
+            if (columnDefault != null)
+              Row(
+                children: [
+                  const Icon(Icons.settings, size: 14),
+                  const SizedBox(width: 4),
+                  Text('Default: $columnDefault'),
+                ],
+              ),
+          ],
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.edit, size: 16),
+          tooltip: 'Edit column',
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Column editing coming soon. Use SQL ALTER TABLE for now.',
+                ),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTableIndexes() async {
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
       final query =
           '''
         SELECT 
           indexname as index_name,
           indexdef as index_definition
         FROM pg_indexes
-        WHERE tablename = '$tableName'
+        WHERE tablename = '${widget.tableName}'
       ''';
 
       final indexes = await adapter.query(query);
@@ -963,7 +1047,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
       showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('Indexes: $tableName'),
+          title: Text('Indexes: ${widget.tableName}'),
           content: SizedBox(
             width: 600,
             height: 400,
