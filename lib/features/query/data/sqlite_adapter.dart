@@ -39,4 +39,16 @@ class SqliteAdapter implements DatabaseAdapter {
   Future<List<Map<String, dynamic>>> getTableStructure(String tableName) async {
     return await query("PRAGMA table_info($tableName)");
   }
+
+  @override
+  Future<List<String>> getDatabases() async {
+    return ['main'];
+  }
+
+  @override
+  Future<void> createDatabase(String name) async {
+    throw UnimplementedError(
+      'Cannot create database in SQLite via SQL connection',
+    );
+  }
 }

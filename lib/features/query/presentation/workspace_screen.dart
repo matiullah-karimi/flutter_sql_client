@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_sql_client/features/connections/presentation/connections_provider.dart';
 import 'package:flutter_sql_client/features/query/data/mysql_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
 import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
@@ -106,6 +107,15 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   @override
   Widget build(BuildContext context) {
     final tablesAsync = ref.watch(tablesProvider(widget.connectionId));
+    final databasesAsync = ref.watch(databasesProvider(widget.connectionId));
+    final activeDb = ref.watch(activeDatabaseProvider(widget.connectionId));
+    final connectionsAsync = ref.watch(connectionsProvider);
+    final config = connectionsAsync.value?.firstWhere(
+      (c) => c.id == widget.connectionId,
+      orElse: () => connectionsAsync.value!.first,
+    );
+    final currentDbName = activeDb ?? config?.database;
+
     final tabs = ref.watch(queryTabsProvider(widget.connectionId));
     final activeTabIndex = ref.watch(
       activeTabIndexProvider(widget.connectionId),
@@ -155,6 +165,63 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
               shape: const RoundedRectangleBorder(),
               child: Column(
                 children: [
+                  // Database Selector
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: databasesAsync.when(
+                            data: (databases) {
+                              // Ensure currentDbName is in the list or null
+                              final value = databases.contains(currentDbName)
+                                  ? currentDbName
+                                  : null;
+                              return DropdownButton<String>(
+                                isExpanded: true,
+                                value: value,
+                                hint: const Text('Select Database'),
+                                items: databases.map((db) {
+                                  return DropdownMenuItem(
+                                    value: db,
+                                    child: Text(
+                                      db,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: (value) {
+                                  if (value != null) {
+                                    ref
+                                            .read(
+                                              activeDatabaseProvider(
+                                                widget.connectionId,
+                                              ).notifier,
+                                            )
+                                            .state =
+                                        value;
+                                    // Invalidate tables to reload for new db
+                                    ref.invalidate(
+                                      tablesProvider(widget.connectionId),
+                                    );
+                                  }
+                                },
+                              );
+                            },
+                            loading: () => const LinearProgressIndicator(),
+                            error: (err, stack) =>
+                                const Text('Error loading databases'),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add, size: 20),
+                          tooltip: 'Create Database',
+                          onPressed: () => _showCreateDatabaseDialog(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
                   Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: Row(
@@ -736,6 +803,47 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
     }
+  }
+
+  Future<void> _showCreateDatabaseDialog() async {
+    final controller = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create Database'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Database Name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                final adapter = await ref.read(
+                  databaseAdapterProvider(widget.connectionId).future,
+                );
+                await adapter.createDatabase(controller.text);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ref.invalidate(databasesProvider(widget.connectionId));
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                }
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showTableStructure(String tableName) {

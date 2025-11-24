@@ -6,6 +6,13 @@ import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/sqlite_adapter.dart';
 import 'package:flutter_sql_client/features/query/domain/database_adapter.dart';
 
+final activeDatabaseProvider = StateProvider.family<String?, int>((
+  ref,
+  connectionId,
+) {
+  return null;
+});
+
 final databaseAdapterProvider = FutureProvider.autoDispose
     .family<DatabaseAdapter, int>((ref, connectionId) async {
       final connectionsAsync = ref.watch(connectionsProvider);
@@ -15,10 +22,15 @@ final databaseAdapterProvider = FutureProvider.autoDispose
         throw Exception('Connections not loaded');
       }
 
-      final config = connections.firstWhere(
+      var config = connections.firstWhere(
         (c) => c.id == connectionId,
         orElse: () => throw Exception('Connection not found'),
       );
+
+      final activeDb = ref.watch(activeDatabaseProvider(connectionId));
+      if (activeDb != null) {
+        config = config.copyWith(database: activeDb);
+      }
 
       DatabaseAdapter adapter;
       switch (config.type) {
@@ -44,6 +56,14 @@ final tablesProvider = FutureProvider.family<List<String>, int>((
 ) async {
   final adapter = await ref.watch(databaseAdapterProvider(connectionId).future);
   return adapter.getTables();
+});
+
+final databasesProvider = FutureProvider.family<List<String>, int>((
+  ref,
+  connectionId,
+) async {
+  final adapter = await ref.watch(databaseAdapterProvider(connectionId).future);
+  return adapter.getDatabases();
 });
 
 final queryResultsProvider =

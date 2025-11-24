@@ -46,4 +46,30 @@ class ConnectionConfig {
            (dbTypeIndex != null
                ? DatabaseType.values[dbTypeIndex]
                : DatabaseType.postgres);
+
+  ConnectionConfig copyWith({
+    int? id,
+    String? uuid,
+    String? name,
+    DatabaseType? type,
+    String? host,
+    int? port,
+    String? database,
+    String? username,
+    String? password,
+    String? filePath,
+  }) {
+    return ConnectionConfig(
+      id: id ?? this.id,
+      uuid: uuid ?? this.uuid,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      host: host ?? this.host,
+      port: port ?? this.port,
+      database: database ?? this.database,
+      username: username ?? this.username,
+      password: password ?? this.password,
+      filePath: filePath ?? this.filePath,
+    );
+  }
 }

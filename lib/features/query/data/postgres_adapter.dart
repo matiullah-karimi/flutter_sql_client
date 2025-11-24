@@ -65,4 +65,21 @@ class PostgresAdapter implements DatabaseAdapter {
       "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = '$tableName'",
     );
   }
+
+  @override
+  Future<List<String>> getDatabases() async {
+    final result = await query(
+      "SELECT datname FROM pg_database WHERE datistemplate = false",
+    );
+    return result.map((row) => row['datname'] as String).toList();
+  }
+
+  @override
+  Future<void> createDatabase(String name) async {
+    // Note: CREATE DATABASE cannot run inside a transaction block.
+    // The query method here uses simple execute which might be fine,
+    // but if it wraps in transaction, this might fail.
+    // Postgres package 'execute' usually runs directly.
+    await query('CREATE DATABASE "$name"');
+  }
 }

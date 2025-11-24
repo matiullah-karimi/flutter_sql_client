@@ -51,4 +51,15 @@ class MysqlAdapter implements DatabaseAdapter {
   Future<List<Map<String, dynamic>>> getTableStructure(String tableName) async {
     return await query("DESCRIBE $tableName");
   }
+
+  @override
+  Future<List<String>> getDatabases() async {
+    final result = await query("SHOW DATABASES");
+    return result.map((row) => row.values.first.toString()).toList();
+  }
+
+  @override
+  Future<void> createDatabase(String name) async {
+    await query('CREATE DATABASE `$name`');
+  }
 }
