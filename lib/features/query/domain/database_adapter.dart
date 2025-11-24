@@ -6,4 +6,5 @@ abstract class DatabaseAdapter {
   Future<List<Map<String, dynamic>>> getTableStructure(String tableName);
   Future<List<String>> getDatabases();
   Future<void> createDatabase(String name);
+  Future<void> exportDatabase(String filePath);
 }

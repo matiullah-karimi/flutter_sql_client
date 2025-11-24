@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:postgres/postgres.dart';
 import 'package:flutter_sql_client/features/connections/domain/connection_config.dart';
 import 'package:flutter_sql_client/features/query/domain/database_adapter.dart';
@@ -81,5 +82,73 @@ class PostgresAdapter implements DatabaseAdapter {
     // but if it wraps in transaction, this might fail.
     // Postgres package 'execute' usually runs directly.
     await query('CREATE DATABASE "$name"');
+  }
+
+  @override
+  Future<void> exportDatabase(String filePath) async {
+    final file = File(filePath);
+    final sink = file.openWrite();
+
+    try {
+      final tables = await getTables();
+
+      for (final table in tables) {
+        // Structure
+        final columns = await query(
+          "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = '$table' ORDER BY ordinal_position",
+        );
+
+        sink.writeln('DROP TABLE IF EXISTS "$table";');
+        sink.write('CREATE TABLE "$table" (');
+
+        final colDefs = columns
+            .map((col) {
+              final name = col['column_name'];
+              final type = col['data_type'];
+              final nullable = col['is_nullable'] == 'YES' ? '' : 'NOT NULL';
+              final def = col['column_default'] != null
+                  ? 'DEFAULT ${col['column_default']}'
+                  : '';
+              return '"$name" $type $nullable $def'.trim();
+            })
+            .join(',\n  ');
+
+        sink.writeln('\n  $colDefs\n);');
+        sink.writeln();
+
+        // Data
+        final rows = await query('SELECT * FROM "$table"');
+        if (rows.isNotEmpty) {
+          sink.writeln('INSERT INTO "$table" VALUES');
+          for (var i = 0; i < rows.length; i++) {
+            final row = rows[i];
+            final values = columns
+                .map((col) {
+                  final val = row[col['column_name']];
+                  return _escapeValue(val);
+                })
+                .join(', ');
+
+            sink.write('($values)');
+            if (i < rows.length - 1) {
+              sink.writeln(',');
+            } else {
+              sink.writeln(';');
+            }
+          }
+          sink.writeln();
+        }
+      }
+    } finally {
+      await sink.close();
+    }
+  }
+
+  String _escapeValue(dynamic value) {
+    if (value == null) return 'NULL';
+    if (value is num) return value.toString();
+    if (value is bool) return value ? 'TRUE' : 'FALSE';
+    final str = value.toString().replaceAll("'", "''");
+    return "'$str'";
   }
 }

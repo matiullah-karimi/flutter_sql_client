@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:mysql_client/mysql_client.dart';
 import 'package:flutter_sql_client/features/connections/domain/connection_config.dart';
 import 'package:flutter_sql_client/features/query/domain/database_adapter.dart';
@@ -61,5 +62,53 @@ class MysqlAdapter implements DatabaseAdapter {
   @override
   Future<void> createDatabase(String name) async {
     await query('CREATE DATABASE `$name`');
+  }
+
+  @override
+  Future<void> exportDatabase(String filePath) async {
+    final file = File(filePath);
+    final sink = file.openWrite();
+
+    try {
+      final tables = await getTables();
+
+      for (final table in tables) {
+        // Structure
+        final createResult = await query('SHOW CREATE TABLE `$table`');
+        if (createResult.isNotEmpty) {
+          final createSql = createResult.first['Create Table'] as String;
+          sink.writeln('DROP TABLE IF EXISTS `$table`;');
+          sink.writeln('$createSql;');
+          sink.writeln();
+        }
+
+        // Data
+        final rows = await query('SELECT * FROM `$table`');
+        if (rows.isNotEmpty) {
+          sink.writeln('INSERT INTO `$table` VALUES');
+          for (var i = 0; i < rows.length; i++) {
+            final row = rows[i];
+            final values = row.values.map((v) => _escapeValue(v)).join(', ');
+            sink.write('($values)');
+            if (i < rows.length - 1) {
+              sink.writeln(',');
+            } else {
+              sink.writeln(';');
+            }
+          }
+          sink.writeln();
+        }
+      }
+    } finally {
+      await sink.close();
+    }
+  }
+
+  String _escapeValue(dynamic value) {
+    if (value == null) return 'NULL';
+    if (value is num) return value.toString();
+    if (value is bool) return value ? '1' : '0';
+    final str = value.toString().replaceAll("'", "''").replaceAll(r'\', r'\\');
+    return "'$str'";
   }
 }

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_sql_client/features/connections/presentation/connections_provider.dart';
@@ -152,6 +153,11 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
             icon: const Icon(Icons.download),
             tooltip: 'Export Results',
             onPressed: () => _exportResults(context, tabs, activeTabIndex),
+          ),
+          IconButton(
+            icon: const Icon(Icons.backup),
+            tooltip: 'Export Database',
+            onPressed: _exportDatabase,
           ),
         ],
       ),
@@ -844,6 +850,44 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _exportDatabase() async {
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export Database to SQL',
+      fileName: 'dump.sql',
+      allowedExtensions: ['sql'],
+      type: FileType.custom,
+    );
+
+    if (outputFile == null) {
+      return;
+    }
+
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Exporting database...')));
+      }
+
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+      await adapter.exportDatabase(outputFile);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Database exported to $outputFile')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error exporting database: $e')));
+      }
+    }
   }
 
   void _showTableStructure(String tableName) {
