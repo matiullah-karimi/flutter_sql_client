@@ -1786,14 +1786,41 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
         databaseAdapterProvider(widget.connectionId).future,
       );
 
-      final query =
-          '''
-        SELECT 
-          indexname as index_name,
-          indexdef as index_definition
-        FROM pg_indexes
-        WHERE tablename = '${widget.tableName}'
-      ''';
+      String query;
+      if (adapter is PostgresAdapter) {
+        query =
+            '''
+          SELECT 
+            indexname as index_name,
+            indexdef as index_definition
+          FROM pg_indexes
+          WHERE tablename = '${widget.tableName}'
+        ''';
+      } else if (adapter is MysqlAdapter) {
+        query =
+            '''
+          SELECT 
+            INDEX_NAME as index_name,
+            CONCAT('INDEX ', INDEX_NAME, ' ON ${widget.tableName} (', GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX), ')') as index_definition
+          FROM information_schema.STATISTICS
+          WHERE TABLE_NAME = '${widget.tableName}'
+          GROUP BY INDEX_NAME
+        ''';
+      } else {
+        // MSSQL
+        query =
+            '''
+          SELECT 
+            i.name as index_name,
+            CONCAT('INDEX ', i.name, ' ON ${widget.tableName} (', 
+              STRING_AGG(c.name, ', ') WITHIN GROUP (ORDER BY ic.key_ordinal), ')') as index_definition
+          FROM sys.indexes i
+          INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+          INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+          WHERE i.object_id = OBJECT_ID('${widget.tableName}')
+          GROUP BY i.name
+        ''';
+      }
 
       final indexes = await adapter.query(query);
 
