@@ -8,6 +8,7 @@ import 'package:flutter_sql_client/features/query/data/mysql_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
 import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
 import 'package:flutter_sql_client/features/query/presentation/query_tabs_provider.dart';
+import 'package:flutter_sql_client/features/query/presentation/sql_theme.dart';
 import 'package:highlight/languages/sql.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pluto_grid/pluto_grid.dart';
@@ -24,6 +25,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   final Map<String, CodeController> _codeControllers = {};
   final Map<String, PlutoGridStateManager> _gridStateManagers = {};
   String _tableSearchQuery = '';
+  List<String> _suggestions = [];
 
   @override
   void dispose() {
@@ -43,6 +45,64 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     return _codeControllers[tabId]!;
   }
 
+  void _onCodeChanged(String value, CodeController controller, String tabId) {
+    ref
+        .read(queryTabsProvider(widget.connectionId).notifier)
+        .updateTabContent(tabId, value);
+
+    final selection = controller.selection;
+    if (selection.baseOffset < 0) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+
+    final text = controller.text;
+    final cursor = selection.baseOffset;
+
+    int start = cursor - 1;
+    while (start >= 0 && _isWordChar(text[start])) {
+      start--;
+    }
+    start++;
+
+    final currentWord = text.substring(start, cursor).toUpperCase();
+
+    if (currentWord.isEmpty) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+
+    final matches = sqlKeywords
+        .where((k) => k.startsWith(currentWord))
+        .toList();
+
+    setState(() => _suggestions = matches);
+  }
+
+  bool _isWordChar(String char) {
+    return RegExp(r'[a-zA-Z0-9_]').hasMatch(char);
+  }
+
+  void _insertSuggestion(String keyword, CodeController controller) {
+    final text = controller.text;
+    final selection = controller.selection;
+    final cursor = selection.baseOffset;
+
+    int start = cursor - 1;
+    while (start >= 0 && _isWordChar(text[start])) {
+      start--;
+    }
+    start++;
+
+    final newText = text.replaceRange(start, cursor, keyword);
+    controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + keyword.length),
+    );
+
+    setState(() => _suggestions = []);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tablesAsync = ref.watch(tablesProvider(widget.connectionId));
@@ -50,6 +110,14 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     final activeTabIndex = ref.watch(
       activeTabIndexProvider(widget.connectionId),
     );
+
+    ref.listen(activeTabIndexProvider(widget.connectionId), (previous, next) {
+      if (previous != next) {
+        setState(() {
+          _suggestions = [];
+        });
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -237,28 +305,69 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                   Expanded(
                     flex: 1,
                     child: CodeTheme(
-                      data: CodeThemeData(styles: const {}),
-                      child: SingleChildScrollView(
-                        child: CodeField(
-                          controller: _getOrCreateController(
-                            tabs[activeTabIndex].id,
-                            tabs[activeTabIndex].content,
-                          ),
-                          textStyle: const TextStyle(fontFamily: 'monospace'),
-                          minLines: 10,
-                          onChanged: (value) {
-                            ref
-                                .read(
-                                  queryTabsProvider(
-                                    widget.connectionId,
-                                  ).notifier,
-                                )
-                                .updateTabContent(
+                      data: CodeThemeData(
+                        styles: Theme.of(context).brightness == Brightness.dark
+                            ? sqlDarkTheme
+                            : sqlTheme,
+                      ),
+                      child: Stack(
+                        children: [
+                          SingleChildScrollView(
+                            child: CodeField(
+                              controller: _getOrCreateController(
+                                tabs[activeTabIndex].id,
+                                tabs[activeTabIndex].content,
+                              ),
+                              textStyle: const TextStyle(
+                                fontFamily: 'monospace',
+                              ),
+                              minLines: 10,
+                              onChanged: (value) => _onCodeChanged(
+                                value,
+                                _getOrCreateController(
                                   tabs[activeTabIndex].id,
-                                  value,
-                                );
-                          },
-                        ),
+                                  tabs[activeTabIndex].content,
+                                ),
+                                tabs[activeTabIndex].id,
+                              ),
+                            ),
+                          ),
+                          if (_suggestions.isNotEmpty)
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              child: Container(
+                                height: 40,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                child: ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: _suggestions.length,
+                                  itemBuilder: (context, index) {
+                                    final suggestion = _suggestions[index];
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 4,
+                                      ),
+                                      child: ActionChip(
+                                        label: Text(suggestion),
+                                        onPressed: () => _insertSuggestion(
+                                          suggestion,
+                                          _getOrCreateController(
+                                            tabs[activeTabIndex].id,
+                                            tabs[activeTabIndex].content,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
