@@ -5,6 +5,8 @@ class QueryTab {
   final List<Map<String, dynamic>>? results;
   final String? error;
   final bool isLoading;
+  final String? sourceTable; // Track which table the results came from
+  final bool hasChanges; // Track if grid has unsaved changes
 
   QueryTab({
     required this.id,
@@ -13,6 +15,8 @@ class QueryTab {
     this.results,
     this.error,
     this.isLoading = false,
+    this.sourceTable,
+    this.hasChanges = false,
   });
 
   QueryTab copyWith({
@@ -21,8 +25,11 @@ class QueryTab {
     List<Map<String, dynamic>>? results,
     String? error,
     bool? isLoading,
+    String? sourceTable,
+    bool? hasChanges,
     bool clearResults = false,
     bool clearError = false,
+    bool clearSourceTable = false,
   }) {
     return QueryTab(
       id: id,
@@ -31,6 +38,8 @@ class QueryTab {
       results: clearResults ? null : (results ?? this.results),
       error: clearError ? null : (error ?? this.error),
       isLoading: isLoading ?? this.isLoading,
+      sourceTable: clearSourceTable ? null : (sourceTable ?? this.sourceTable),
+      hasChanges: hasChanges ?? this.hasChanges,
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
@@ -19,6 +20,7 @@ class WorkspaceScreen extends ConsumerStatefulWidget {
 
 class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   final Map<String, CodeController> _codeControllers = {};
+  final Map<String, PlutoGridStateManager> _gridStateManagers = {};
 
   @override
   void dispose() {
@@ -54,6 +56,16 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
             icon: const Icon(Icons.play_arrow),
             tooltip: 'Run Query',
             onPressed: () => _runQuery(tabs, activeTabIndex),
+          ),
+          IconButton(
+            icon: const Icon(Icons.save),
+            tooltip: 'Save Changes',
+            onPressed:
+                (tabs.isNotEmpty &&
+                    activeTabIndex < tabs.length &&
+                    tabs[activeTabIndex].hasChanges)
+                ? () => _saveChanges(tabs, activeTabIndex)
+                : null,
           ),
           IconButton(
             icon: const Icon(Icons.download),
@@ -233,14 +245,47 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
       );
       final results = await adapter.query(controller.text);
 
+      // Extract table name from SQL query (simple regex for SELECT FROM)
+      final String? sourceTable = _extractTableName(controller.text);
+
       ref
           .read(queryTabsProvider(widget.connectionId).notifier)
-          .setTabResults(activeTab.id, results);
+          .setTabResults(activeTab.id, results, sourceTable: sourceTable);
     } catch (e) {
       ref
           .read(queryTabsProvider(widget.connectionId).notifier)
           .setTabError(activeTab.id, e.toString());
     }
+  }
+
+  String? _extractTableName(String sql) {
+    // Simple regex to extract table name from SELECT ... FROM table_name
+    final regex = RegExp(r'FROM\s+([`"]?)(\w+)\1', caseSensitive: false);
+    final match = regex.firstMatch(sql);
+    return match?.group(2);
+  }
+
+  Future<void> _saveChanges(List tabs, int activeTabIndex) async {
+    if (tabs.isEmpty || activeTabIndex >= tabs.length) return;
+
+    final activeTab = tabs[activeTabIndex];
+    final stateManager = _gridStateManagers[activeTab.id];
+
+    if (stateManager == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Grid not initialized')));
+      }
+      return;
+    }
+
+    await _saveGridChanges(stateManager, activeTab);
+
+    // Clear the hasChanges flag after successful save
+    ref
+        .read(queryTabsProvider(widget.connectionId).notifier)
+        .setTabHasChanges(activeTab.id, false);
   }
 
   Widget _buildResults(tab) {
@@ -265,32 +310,164 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
       return const Center(child: Text('No results or no query run yet.'));
     }
 
-    return PlutoGrid(
-      columns: results.first.keys.map<PlutoColumn>((key) {
-        return PlutoColumn(
-          title: key,
-          field: key,
-          type: PlutoColumnType.text(),
-        );
-      }).toList(),
-      rows: results.map<PlutoRow>((row) {
-        return PlutoRow(
-          cells: Map<String, PlutoCell>.fromEntries(
-            row.entries.map<MapEntry<String, PlutoCell>>((
-              MapEntry<String, dynamic> entry,
-            ) {
-              return MapEntry(
-                entry.key,
-                PlutoCell(value: entry.value.toString()),
-              );
-            }),
-          ),
-        );
-      }).toList(),
-      configuration: const PlutoGridConfiguration(
-        style: PlutoGridStyleConfig(enableGridBorderShadow: false),
+    PlutoGridStateManager? stateManager;
+
+    return Focus(
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.keyS &&
+            (event.physicalKey == PhysicalKeyboardKey.metaLeft ||
+                event.physicalKey == PhysicalKeyboardKey.metaRight ||
+                HardwareKeyboard.instance.isMetaPressed)) {
+          final manager = stateManager;
+          if (manager != null) {
+            _saveGridChanges(manager, tab);
+          }
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: PlutoGrid(
+        columns: results.first.keys.map<PlutoColumn>((key) {
+          return PlutoColumn(
+            title: key,
+            field: key,
+            type: PlutoColumnType.text(),
+            enableEditingMode: true,
+          );
+        }).toList(),
+        rows: results.map<PlutoRow>((row) {
+          return PlutoRow(
+            cells: Map<String, PlutoCell>.fromEntries(
+              row.entries.map<MapEntry<String, PlutoCell>>((
+                MapEntry<String, dynamic> entry,
+              ) {
+                return MapEntry(
+                  entry.key,
+                  PlutoCell(value: entry.value.toString()),
+                );
+              }),
+            ),
+          );
+        }).toList(),
+        onLoaded: (PlutoGridOnLoadedEvent event) {
+          _gridStateManagers[tab.id] = event.stateManager;
+          stateManager = event.stateManager;
+          event.stateManager.setKeepFocus(true);
+        },
+        onChanged: (PlutoGridOnChangedEvent event) {
+          // Mark tab as having changes (delayed to avoid modifying provider during build)
+          Future(() {
+            ref
+                .read(queryTabsProvider(widget.connectionId).notifier)
+                .setTabHasChanges(tab.id, true);
+          });
+        },
+        configuration: const PlutoGridConfiguration(
+          style: PlutoGridStyleConfig(enableGridBorderShadow: false),
+          enterKeyAction: PlutoGridEnterKeyAction.editingAndMoveDown,
+        ),
       ),
     );
+  }
+
+  Future<void> _saveGridChanges(PlutoGridStateManager stateManager, tab) async {
+    final sourceTable = tab.sourceTable;
+
+    if (sourceTable == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot save: Unable to determine source table'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      // Get all rows from the grid
+      final rows = stateManager.rows;
+      final columns = stateManager.columns;
+
+      // Assume first column is the primary key (simple approach)
+      if (columns.isEmpty || rows.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('No data to save')));
+        }
+        return;
+      }
+
+      final primaryKeyColumn = columns.first.field;
+      int updatedCount = 0;
+
+      // Generate and execute UPDATE statements for each modified row
+      for (final row in rows) {
+        final primaryKeyValue = row.cells[primaryKeyColumn]?.value;
+
+        if (primaryKeyValue == null) continue;
+
+        // Build UPDATE statement
+        final setClauses = <String>[];
+        for (final column in columns) {
+          if (column.field == primaryKeyColumn) continue; // Skip primary key
+
+          final cell = row.cells[column.field];
+          if (cell != null) {
+            final cellValue = cell.value;
+
+            // Handle NULL values properly
+            if (cellValue == null ||
+                cellValue.toString().toLowerCase() == 'null') {
+              setClauses.add("${column.field} = NULL");
+            } else {
+              final value = cellValue.toString().replaceAll(
+                "'",
+                "''",
+              ); // Escape quotes
+              setClauses.add("${column.field} = '$value'");
+            }
+          }
+        }
+
+        if (setClauses.isEmpty) continue;
+
+        final updateSql =
+            '''
+          UPDATE $sourceTable 
+          SET ${setClauses.join(', ')} 
+          WHERE $primaryKeyColumn = '$primaryKeyValue'
+        ''';
+
+        await adapter.query(updateSql);
+        updatedCount++;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully updated $updatedCount row(s)'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildTab(BuildContext context, tab, int index, int activeIndex) {

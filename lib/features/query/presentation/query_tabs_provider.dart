@@ -63,11 +63,21 @@ class QueryTabsNotifier extends StateNotifier<List<QueryTab>> {
     ];
   }
 
-  void setTabResults(String id, List<Map<String, dynamic>> results) {
+  void setTabResults(
+    String id,
+    List<Map<String, dynamic>> results, {
+    String? sourceTable,
+  }) {
     state = [
       for (final tab in state)
         if (tab.id == id)
-          tab.copyWith(results: results, isLoading: false, clearError: true)
+          tab.copyWith(
+            results: results,
+            isLoading: false,
+            clearError: true,
+            sourceTable: sourceTable,
+            hasChanges: false, // Reset changes flag when loading new results
+          )
         else
           tab,
     ];
@@ -77,6 +87,13 @@ class QueryTabsNotifier extends StateNotifier<List<QueryTab>> {
     state = [
       for (final tab in state)
         if (tab.id == id) tab.copyWith(error: error, isLoading: false) else tab,
+    ];
+  }
+
+  void setTabHasChanges(String id, bool hasChanges) {
+    state = [
+      for (final tab in state)
+        if (tab.id == id) tab.copyWith(hasChanges: hasChanges) else tab,
     ];
   }
 }
