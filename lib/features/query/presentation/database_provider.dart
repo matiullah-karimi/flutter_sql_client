@@ -4,6 +4,7 @@ import 'package:flutter_sql_client/features/connections/presentation/connections
 import 'package:flutter_sql_client/features/query/data/mysql_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/sqlite_adapter.dart';
+import 'package:flutter_sql_client/features/query/data/mssql_adapter.dart';
 import 'package:flutter_sql_client/features/query/domain/database_adapter.dart';
 
 final activeDatabaseProvider = StateProvider.family<String?, int>((
@@ -42,6 +43,9 @@ final databaseAdapterProvider = FutureProvider.autoDispose
           break;
         case DatabaseType.sqlite:
           adapter = SqliteAdapter(config);
+          break;
+        case DatabaseType.mssql:
+          adapter = MssqlAdapter(config);
           break;
       }
 

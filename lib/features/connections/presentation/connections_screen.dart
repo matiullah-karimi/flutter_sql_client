@@ -96,6 +96,8 @@ class ConnectionsScreen extends ConsumerWidget {
         return Icons.storage; // Placeholder for MySQL
       case DatabaseType.sqlite:
         return Icons.folder; // Placeholder for SQLite
+      case DatabaseType.mssql:
+        return Icons.cloud; // Placeholder for MSSQL
     }
   }
 
@@ -180,6 +182,9 @@ class _ConnectionDialogState extends ConsumerState<ConnectionDialog> {
                       }
                       if (_type == DatabaseType.mysql) {
                         _portController.text = '3306';
+                      }
+                      if (_type == DatabaseType.mssql) {
+                        _portController.text = '1433';
                       }
                     });
                   }

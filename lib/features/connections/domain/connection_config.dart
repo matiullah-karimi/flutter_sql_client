@@ -1,7 +1,7 @@
 import 'package:objectbox/objectbox.dart';
 import 'package:uuid/uuid.dart';
 
-enum DatabaseType { postgres, mysql, sqlite }
+enum DatabaseType { postgres, mysql, sqlite, mssql }
 
 @Entity()
 class ConnectionConfig {
