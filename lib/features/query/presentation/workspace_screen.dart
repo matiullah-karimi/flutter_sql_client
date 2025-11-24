@@ -11,6 +11,7 @@ import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
 import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
 import 'package:flutter_sql_client/features/query/presentation/query_tabs_provider.dart';
 import 'package:flutter_sql_client/features/query/presentation/sql_theme.dart';
+import 'package:go_router/go_router.dart';
 import 'package:highlight/languages/sql.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pluto_grid/pluto_grid.dart';
@@ -133,7 +134,12 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Workspace'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back to Connections',
+          onPressed: () => context.go('/'),
+        ),
+        title: Text(config?.name ?? 'Workspace'),
         actions: [
           IconButton(
             icon: const Icon(Icons.play_arrow),
