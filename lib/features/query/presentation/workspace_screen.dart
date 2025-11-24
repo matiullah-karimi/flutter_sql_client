@@ -153,10 +153,16 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                             endIndent: 16,
                           ),
                           itemBuilder: (context, index) {
+                            final tableName = filteredTables[index];
                             return ListTile(
-                              title: Text(filteredTables[index]),
+                              title: Text(tableName),
                               dense: true,
                               leading: const Icon(Icons.table_chart, size: 16),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.info_outline, size: 16),
+                                tooltip: 'View Structure',
+                                onPressed: () => _showTableStructure(tableName),
+                              ),
                               onTap: () {
                                 if (tabs.isNotEmpty &&
                                     activeTabIndex < tabs.length) {
@@ -166,7 +172,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                     activeTab.content,
                                   );
                                   controller.text =
-                                      'SELECT * FROM ${filteredTables[index]} LIMIT 100;';
+                                      'SELECT * FROM $tableName LIMIT 100;';
                                 }
                               },
                             );
@@ -617,6 +623,380 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _showTableStructure(String tableName) async {
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      // Query to get column information (works for most SQL databases)
+      final query =
+          '''
+        SELECT 
+          column_name,
+          data_type,
+          is_nullable,
+          column_default
+        FROM information_schema.columns
+        WHERE table_name = '$tableName'
+        ORDER BY ordinal_position
+      ''';
+
+      final columns = await adapter.query(query);
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.table_chart),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Table Structure'),
+                    Text(
+                      tableName,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 700,
+            height: 500,
+            child: Column(
+              children: [
+                // Action buttons
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showAddColumnDialog(tableName);
+                      },
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('Add Column'),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showTableIndexes(tableName);
+                      },
+                      icon: const Icon(Icons.key, size: 16),
+                      label: const Text('View Indexes'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                // Columns list
+                Expanded(
+                  child: columns.isEmpty
+                      ? const Center(child: Text('No columns found'))
+                      : ListView.builder(
+                          itemCount: columns.length,
+                          itemBuilder: (context, index) {
+                            final column = columns[index];
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  radius: 16,
+                                  child: Text('${index + 1}'),
+                                ),
+                                title: const Text(
+                                  'Column',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.label, size: 14),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Name: ${column['column_name']}',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.text_fields, size: 14),
+                                        const SizedBox(width: 4),
+                                        Text('Type: ${column['data_type']}'),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          column['is_nullable'] == 'YES'
+                                              ? Icons.check_circle_outline
+                                              : Icons.cancel_outlined,
+                                          size: 14,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Nullable: ${column['is_nullable']}',
+                                        ),
+                                      ],
+                                    ),
+                                    if (column['column_default'] != null)
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.settings, size: 14),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Default: ${column['column_default']}',
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.edit, size: 16),
+                                  tooltip: 'Edit column',
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    _showEditColumnDialog(
+                                      tableName,
+                                      column['column_name']?.toString() ?? '',
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading structure: $e')));
+      }
+    }
+  }
+
+  Future<void> _showAddColumnDialog(String tableName) async {
+    final nameController = TextEditingController();
+    final typeController = TextEditingController(text: 'VARCHAR(255)');
+    bool isNullable = true;
+    String? defaultValue;
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text('Add Column to $tableName'),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Column Name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: typeController,
+                  decoration: const InputDecoration(
+                    labelText: 'Data Type',
+                    border: OutlineInputBorder(),
+                    hintText: 'e.g., VARCHAR(255), INT, TEXT',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                CheckboxListTile(
+                  title: const Text('Nullable'),
+                  value: isNullable,
+                  onChanged: (value) {
+                    setState(() {
+                      isNullable = value ?? true;
+                    });
+                  },
+                ),
+                TextField(
+                  decoration: const InputDecoration(
+                    labelText: 'Default Value (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    defaultValue = value.isEmpty ? null : value;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isEmpty ||
+                    typeController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Name and type are required')),
+                  );
+                  return;
+                }
+
+                try {
+                  final adapter = await ref.read(
+                    databaseAdapterProvider(widget.connectionId).future,
+                  );
+
+                  final alterQuery =
+                      '''
+                    ALTER TABLE $tableName 
+                    ADD COLUMN ${nameController.text} ${typeController.text}
+                    ${isNullable ? 'NULL' : 'NOT NULL'}
+                    ${defaultValue != null ? "DEFAULT '$defaultValue'" : ''}
+                  ''';
+
+                  await adapter.query(alterQuery);
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Column added successfully'),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                }
+              },
+              child: const Text('Add Column'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEditColumnDialog(
+    String tableName,
+    String columnName,
+  ) async {
+    // Note: Column editing varies greatly between databases
+    // This is a simplified version
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Column editing coming soon. Use SQL ALTER TABLE for now.',
+        ),
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _showTableIndexes(String tableName) async {
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      // Query to get index information
+      final query =
+          '''
+        SELECT 
+          indexname as index_name,
+          indexdef as index_definition
+        FROM pg_indexes
+        WHERE tablename = '$tableName'
+      ''';
+
+      final indexes = await adapter.query(query);
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Indexes: $tableName'),
+          content: SizedBox(
+            width: 600,
+            height: 400,
+            child: indexes.isEmpty
+                ? const Center(child: Text('No indexes found'))
+                : ListView.builder(
+                    itemCount: indexes.length,
+                    itemBuilder: (context, index) {
+                      final idx = indexes[index];
+                      return Card(
+                        child: ListTile(
+                          title: Text(idx['index_name']?.toString() ?? ''),
+                          subtitle: Text(
+                            idx['index_definition']?.toString() ?? '',
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading indexes: $e')));
       }
     }
   }
