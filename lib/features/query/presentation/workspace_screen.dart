@@ -21,6 +21,7 @@ class WorkspaceScreen extends ConsumerStatefulWidget {
 class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   final Map<String, CodeController> _codeControllers = {};
   final Map<String, PlutoGridStateManager> _gridStateManagers = {};
+  String _tableSearchQuery = '';
 
   @override
   void dispose() {
@@ -103,30 +104,75 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                       ],
                     ),
                   ),
+                  // Search field
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search tables...',
+                        prefixIcon: Icon(Icons.search, size: 20),
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 12,
+                        ),
+                        isDense: true,
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _tableSearchQuery = value.toLowerCase();
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Expanded(
                     child: tablesAsync.when(
-                      data: (tables) => ListView.builder(
-                        itemCount: tables.length,
-                        itemBuilder: (context, index) {
-                          return ListTile(
-                            title: Text(tables[index]),
-                            dense: true,
-                            leading: const Icon(Icons.table_chart, size: 16),
-                            onTap: () {
-                              if (tabs.isNotEmpty &&
-                                  activeTabIndex < tabs.length) {
-                                final activeTab = tabs[activeTabIndex];
-                                final controller = _getOrCreateController(
-                                  activeTab.id,
-                                  activeTab.content,
-                                );
-                                controller.text =
-                                    'SELECT * FROM ${tables[index]} LIMIT 100;';
-                              }
-                            },
-                          );
-                        },
-                      ),
+                      data: (tables) {
+                        // Filter tables based on search query
+                        final filteredTables = _tableSearchQuery.isEmpty
+                            ? tables
+                            : tables
+                                  .where(
+                                    (table) => table.toLowerCase().contains(
+                                      _tableSearchQuery,
+                                    ),
+                                  )
+                                  .toList();
+
+                        if (filteredTables.isEmpty) {
+                          return const Center(child: Text('No tables found'));
+                        }
+
+                        return ListView.separated(
+                          itemCount: filteredTables.length,
+                          separatorBuilder: (context, index) => const Divider(
+                            height: 1,
+                            thickness: 1,
+                            indent: 16,
+                            endIndent: 16,
+                          ),
+                          itemBuilder: (context, index) {
+                            return ListTile(
+                              title: Text(filteredTables[index]),
+                              dense: true,
+                              leading: const Icon(Icons.table_chart, size: 16),
+                              onTap: () {
+                                if (tabs.isNotEmpty &&
+                                    activeTabIndex < tabs.length) {
+                                  final activeTab = tabs[activeTabIndex];
+                                  final controller = _getOrCreateController(
+                                    activeTab.id,
+                                    activeTab.content,
+                                  );
+                                  controller.text =
+                                      'SELECT * FROM ${filteredTables[index]} LIMIT 100;';
+                                }
+                              },
+                            );
+                          },
+                        );
+                      },
                       loading: () =>
                           const Center(child: CircularProgressIndicator()),
                       error: (err, stack) => Center(child: Text('Error: $err')),
