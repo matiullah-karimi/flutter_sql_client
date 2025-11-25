@@ -161,10 +161,19 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
             tooltip: 'Export Results',
             onPressed: () => _exportResults(context, tabs, activeTabIndex),
           ),
+          const SizedBox(
+            height: 24,
+            child: VerticalDivider(width: 1, thickness: 1),
+          ),
           IconButton(
             icon: const Icon(Icons.backup),
             tooltip: 'Export Database',
             onPressed: _exportDatabase,
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Import Database',
+            onPressed: _importDatabase,
           ),
         ],
       ),
@@ -1011,6 +1020,84 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error exporting database: $e')));
+      }
+    }
+  }
+
+  Future<void> _importDatabase() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['sql'],
+      );
+
+      if (result == null || result.files.isEmpty) {
+        return;
+      }
+
+      final file = File(result.files.single.path!);
+      final content = await file.readAsString();
+
+      if (content.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Selected file is empty')),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Importing database...')));
+      }
+
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      // Naive split by semicolon.
+      // TODO: Implement a more robust SQL parser/splitter.
+      final statements = content
+          .split(';')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+
+      int successCount = 0;
+      int errorCount = 0;
+
+      for (final statement in statements) {
+        try {
+          await adapter.query(statement);
+          successCount++;
+        } catch (e) {
+          errorCount++;
+          debugPrint('Error executing statement: $statement\nError: $e');
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Import completed. Success: $successCount, Errors: $errorCount',
+            ),
+            backgroundColor: errorCount > 0 ? Colors.orange : Colors.green,
+          ),
+        );
+        ref.invalidate(tablesProvider(widget.connectionId));
+        ref.invalidate(databasesProvider(widget.connectionId));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Import failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
