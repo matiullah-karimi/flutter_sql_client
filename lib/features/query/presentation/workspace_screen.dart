@@ -604,6 +604,14 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
 
     if (controller == null || controller.text.isEmpty) return;
 
+    // Determine query to run: selection or full text
+    String queryToRun = controller.text;
+    if (controller.selection.isValid && !controller.selection.isCollapsed) {
+      queryToRun = controller.selection.textInside(controller.text);
+    }
+
+    if (queryToRun.trim().isEmpty) return;
+
     // Set loading state
     ref
         .read(queryTabsProvider(widget.connectionId).notifier)
@@ -613,10 +621,10 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
       final adapter = await ref.read(
         databaseAdapterProvider(widget.connectionId).future,
       );
-      final results = await adapter.query(controller.text);
+      final results = await adapter.query(queryToRun);
 
       // Extract table name from SQL query (simple regex for SELECT FROM)
-      final String? sourceTable = _extractTableName(controller.text);
+      final String? sourceTable = _extractTableName(queryToRun);
 
       ref
           .read(queryTabsProvider(widget.connectionId).notifier)
