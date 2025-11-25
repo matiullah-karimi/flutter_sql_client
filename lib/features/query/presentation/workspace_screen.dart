@@ -1151,10 +1151,15 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
   bool _isAutoIncrement = false;
   bool _isUnsigned = false;
 
+  // Indexes state
+  List<Map<String, dynamic>>? _indexes;
+  bool _isLoadingIndexes = true;
+
   @override
   void initState() {
     super.initState();
     _loadColumns();
+    _loadIndexes();
   }
 
   @override
@@ -1317,6 +1322,72 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
     }
   }
 
+  Future<void> _loadIndexes() async {
+    setState(() {
+      _isLoadingIndexes = true;
+    });
+
+    try {
+      final adapter = await ref.read(
+        databaseAdapterProvider(widget.connectionId).future,
+      );
+
+      String query;
+      if (adapter is PostgresAdapter) {
+        query =
+            '''
+          SELECT 
+            indexname as index_name,
+            indexdef as index_definition
+          FROM pg_indexes
+          WHERE tablename = '${widget.tableName}'
+        ''';
+      } else if (adapter is MysqlAdapter) {
+        query =
+            '''
+          SELECT 
+            INDEX_NAME as index_name,
+            CONCAT('INDEX ', INDEX_NAME, ' ON ${widget.tableName} (', GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX), ')') as index_definition
+          FROM information_schema.STATISTICS
+          WHERE TABLE_NAME = '${widget.tableName}'
+          GROUP BY INDEX_NAME
+        ''';
+      } else {
+        // MSSQL
+        query =
+            '''
+          SELECT 
+            i.name as index_name,
+            CONCAT('INDEX ', i.name, ' ON ${widget.tableName} (', 
+              STRING_AGG(c.name, ', ') WITHIN GROUP (ORDER BY ic.key_ordinal), ')') as index_definition
+          FROM sys.indexes i
+          INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+          INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+          WHERE i.object_id = OBJECT_ID('${widget.tableName}')
+          GROUP BY i.name
+        ''';
+      }
+
+      final indexes = await adapter.query(query);
+
+      if (mounted) {
+        setState(() {
+          _indexes = indexes;
+          _isLoadingIndexes = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingIndexes = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading indexes: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -1342,57 +1413,121 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
           ),
         ],
       ),
-      content: SizedBox(
-        width: 700,
-        height: 500,
-        child: Column(
-          children: [
-            Row(
-              children: [
-                if (!_isAddingColumn)
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _isAddingColumn = true;
-                      });
-                    },
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Add Column'),
-                  ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () => _showTableIndexes(),
-                  icon: const Icon(Icons.key, size: 16),
-                  label: const Text('View Indexes'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 8),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                  ? Center(child: Text('Error: $_error'))
-                  : ListView(
+      content: DefaultTabController(
+        length: 2,
+        child: SizedBox(
+          width: 700,
+          height: 500,
+          child: Column(
+            children: [
+              const TabBar(
+                labelColor: Colors.blue,
+                unselectedLabelColor: Colors.grey,
+                tabs: [
+                  Tab(text: 'Columns'),
+                  Tab(text: 'Indexes'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    // Columns Tab
+                    Column(
                       children: [
-                        if (_isAddingColumn) _buildAddColumnForm(),
-                        if (_columns != null && _columns!.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Center(child: Text('No columns found')),
-                          )
-                        else if (_columns != null)
-                          ..._columns!.asMap().entries.map((entry) {
-                            final index = entry.key;
-                            final column = entry.value;
-                            return _buildColumnItem(index, column);
-                          }),
+                        Row(
+                          children: [
+                            if (!_isAddingColumn)
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    _isAddingColumn = true;
+                                  });
+                                },
+                                icon: const Icon(Icons.add, size: 16),
+                                label: const Text('Add Column'),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _isLoading
+                              ? const Center(child: CircularProgressIndicator())
+                              : _error != null
+                              ? Center(child: Text('Error: $_error'))
+                              : ListView(
+                                  children: [
+                                    if (_isAddingColumn) _buildAddColumnForm(),
+                                    if (_columns != null && _columns!.isEmpty)
+                                      const Padding(
+                                        padding: EdgeInsets.all(16.0),
+                                        child: Center(
+                                          child: Text('No columns found'),
+                                        ),
+                                      )
+                                    else if (_columns != null)
+                                      ..._columns!.asMap().entries.map((entry) {
+                                        final index = entry.key;
+                                        final column = entry.value;
+                                        return _buildColumnItem(index, column);
+                                      }),
+                                  ],
+                                ),
+                        ),
                       ],
                     ),
-            ),
-          ],
+                    // Indexes Tab
+                    Column(
+                      children: [
+                        Row(
+                          children: [
+                            ElevatedButton.icon(
+                              onPressed: _showAddIndexDialog,
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text('Add Index'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Expanded(
+                          child: _isLoadingIndexes
+                              ? const Center(child: CircularProgressIndicator())
+                              : _indexes == null || _indexes!.isEmpty
+                              ? const Center(child: Text('No indexes found'))
+                              : ListView.builder(
+                                  itemCount: _indexes!.length,
+                                  itemBuilder: (context, index) {
+                                    final idx = _indexes![index];
+                                    return Card(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      child: ListTile(
+                                        leading: const Icon(Icons.key),
+                                        title: Text(
+                                          idx['index_name']?.toString() ?? '',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          idx['index_definition']?.toString() ??
+                                              '',
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
@@ -1778,101 +1913,6 @@ class _TableStructureDialogState extends ConsumerState<_TableStructureDialog> {
         ),
       ),
     );
-  }
-
-  Future<void> _showTableIndexes() async {
-    try {
-      final adapter = await ref.read(
-        databaseAdapterProvider(widget.connectionId).future,
-      );
-
-      String query;
-      if (adapter is PostgresAdapter) {
-        query =
-            '''
-          SELECT 
-            indexname as index_name,
-            indexdef as index_definition
-          FROM pg_indexes
-          WHERE tablename = '${widget.tableName}'
-        ''';
-      } else if (adapter is MysqlAdapter) {
-        query =
-            '''
-          SELECT 
-            INDEX_NAME as index_name,
-            CONCAT('INDEX ', INDEX_NAME, ' ON ${widget.tableName} (', GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX), ')') as index_definition
-          FROM information_schema.STATISTICS
-          WHERE TABLE_NAME = '${widget.tableName}'
-          GROUP BY INDEX_NAME
-        ''';
-      } else {
-        // MSSQL
-        query =
-            '''
-          SELECT 
-            i.name as index_name,
-            CONCAT('INDEX ', i.name, ' ON ${widget.tableName} (', 
-              STRING_AGG(c.name, ', ') WITHIN GROUP (ORDER BY ic.key_ordinal), ')') as index_definition
-          FROM sys.indexes i
-          INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
-          INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
-          WHERE i.object_id = OBJECT_ID('${widget.tableName}')
-          GROUP BY i.name
-        ''';
-      }
-
-      final indexes = await adapter.query(query);
-
-      if (!mounted) return;
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Indexes: ${widget.tableName}'),
-          content: SizedBox(
-            width: 600,
-            height: 400,
-            child: indexes.isEmpty
-                ? const Center(child: Text('No indexes found'))
-                : ListView.builder(
-                    itemCount: indexes.length,
-                    itemBuilder: (context, index) {
-                      final idx = indexes[index];
-                      return Card(
-                        child: ListTile(
-                          title: Text(idx['index_name']?.toString() ?? ''),
-                          subtitle: Text(
-                            idx['index_definition']?.toString() ?? '',
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            TextButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _showAddIndexDialog();
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Add Index'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error loading indexes: $e')));
-      }
-    }
   }
 
   Future<void> _showAddIndexDialog() async {
