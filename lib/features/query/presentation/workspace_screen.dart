@@ -161,20 +161,6 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
             tooltip: 'Export Results',
             onPressed: () => _exportResults(context, tabs, activeTabIndex),
           ),
-          const SizedBox(
-            height: 24,
-            child: VerticalDivider(width: 1, thickness: 1),
-          ),
-          IconButton(
-            icon: const Icon(Icons.backup),
-            tooltip: 'Export Database',
-            onPressed: _exportDatabase,
-          ),
-          IconButton(
-            icon: const Icon(Icons.download_outlined),
-            tooltip: 'Import Database',
-            onPressed: _importDatabase,
-          ),
         ],
       ),
       body: LayoutBuilder(
@@ -249,6 +235,10 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                   if (currentDbName != null) {
                                     _showDropDatabaseDialog(currentDbName);
                                   }
+                                } else if (value == 'export') {
+                                  _exportDatabase();
+                                } else if (value == 'import') {
+                                  _importDatabase();
                                 }
                               },
                               itemBuilder: (context) => [
@@ -281,6 +271,34 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                       ],
                                     ),
                                   ),
+                                const PopupMenuItem(
+                                  value: 'export',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.backup,
+                                        color: Colors.blue,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Export Database'),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'import',
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.restore,
+                                        color: Colors.orange,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Import Database'),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                           ],
