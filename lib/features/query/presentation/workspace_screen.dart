@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_sql_client/features/connections/presentation/connections_provider.dart';
 import 'package:flutter_sql_client/features/query/data/mysql_adapter.dart';
 import 'package:flutter_sql_client/features/query/data/postgres_adapter.dart';
+import 'package:flutter_sql_client/features/query/domain/query_tab.dart';
 import 'package:flutter_sql_client/features/query/presentation/database_provider.dart';
 import 'package:flutter_sql_client/features/query/presentation/query_tabs_provider.dart';
 import 'package:flutter_sql_client/features/query/presentation/sql_theme.dart';
@@ -684,7 +685,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         .setTabHasChanges(activeTab.id, false);
   }
 
-  Widget _buildResults(tab) {
+  Widget _buildResults(QueryTab tab) {
     if (tab.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -1083,13 +1084,8 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         databaseAdapterProvider(widget.connectionId).future,
       );
 
-      // Naive split by semicolon.
-      // TODO: Implement a more robust SQL parser/splitter.
-      final statements = content
-          .split(';')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
+      // Use robust SQL parser to split statements
+      final statements = _splitSqlStatements(content);
 
       int successCount = 0;
       int errorCount = 0;
@@ -1126,6 +1122,103 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         );
       }
     }
+  }
+
+  /// Splits SQL content into individual statements, properly handling:
+  /// - String literals (single and double quotes)
+  /// - Line comments (--)
+  /// - Block comments (/* */)
+  /// - Escaped characters
+  List<String> _splitSqlStatements(String content) {
+    final statements = <String>[];
+    final buffer = StringBuffer();
+
+    bool inSingleQuote = false;
+    bool inDoubleQuote = false;
+    bool inLineComment = false;
+    bool inBlockComment = false;
+
+    for (int i = 0; i < content.length; i++) {
+      final char = content[i];
+      final nextChar = i + 1 < content.length ? content[i + 1] : '';
+      final prevChar = i > 0 ? content[i - 1] : '';
+
+      // Handle line comments
+      if (!inSingleQuote && !inDoubleQuote && !inBlockComment) {
+        if (char == '-' && nextChar == '-') {
+          inLineComment = true;
+          buffer.write(char);
+          continue;
+        }
+      }
+
+      // End line comment on newline
+      if (inLineComment && (char == '\n' || char == '\r')) {
+        inLineComment = false;
+        buffer.write(char);
+        continue;
+      }
+
+      // Handle block comments
+      if (!inSingleQuote && !inDoubleQuote && !inLineComment) {
+        if (char == '/' && nextChar == '*') {
+          inBlockComment = true;
+          buffer.write(char);
+          continue;
+        }
+      }
+
+      if (inBlockComment && char == '*' && nextChar == '/') {
+        inBlockComment = false;
+        buffer.write(char);
+        i++; // Skip the next '/'
+        buffer.write(content[i]);
+        continue;
+      }
+
+      // Skip processing if we're in a comment
+      if (inLineComment || inBlockComment) {
+        buffer.write(char);
+        continue;
+      }
+
+      // Handle string literals
+      // Check for escaped quotes (e.g., \' or \")
+      final isEscaped = prevChar == '\\';
+
+      if (char == "'" && !inDoubleQuote && !isEscaped) {
+        inSingleQuote = !inSingleQuote;
+        buffer.write(char);
+        continue;
+      }
+
+      if (char == '"' && !inSingleQuote && !isEscaped) {
+        inDoubleQuote = !inDoubleQuote;
+        buffer.write(char);
+        continue;
+      }
+
+      // Handle statement terminator (semicolon)
+      if (char == ';' && !inSingleQuote && !inDoubleQuote) {
+        // Don't include the semicolon in the statement
+        final statement = buffer.toString().trim();
+        if (statement.isNotEmpty) {
+          statements.add(statement);
+        }
+        buffer.clear();
+        continue;
+      }
+
+      buffer.write(char);
+    }
+
+    // Add any remaining content as the last statement
+    final lastStatement = buffer.toString().trim();
+    if (lastStatement.isNotEmpty) {
+      statements.add(lastStatement);
+    }
+
+    return statements;
   }
 
   Future<void> _showDropDatabaseDialog(String dbName) async {
